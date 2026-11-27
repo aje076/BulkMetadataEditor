@@ -71,3 +71,10 @@ jobs:
           name: BulkMetadataEditor-Setup
           path: release/BulkMetadataEditor-Setup.exe
           if-no-files-found: error
+
+      - name: Upload portable build for interactive verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: BulkMetadataEditor-Portable
+          path: dist/BulkMetadataEditor
+          if-no-files-found: error
