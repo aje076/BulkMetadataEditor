@@ -178,7 +178,8 @@ class App:
             match=re.match(r"^(\d{4})[:-](\d{2})[:-](\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?",value)
             if match:
                 date="-".join(match.group(i) for i in (1,2,3))
-                return date+("T"+match.group(4) if match.group(4) else "")
+                time=match.group(4)
+                return date+("T"+time if time and time != "00:00:00" else "")
         return value
 
     @staticmethod
