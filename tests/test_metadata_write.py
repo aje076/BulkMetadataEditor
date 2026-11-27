@@ -121,11 +121,12 @@ def test_apply_writes_filled_fields_to_multiple_files_and_preserves_blanks(tmp_p
         assert values["XMP-photoshop:Instructions"] == "Preserve instructions"
 
 
-def test_missing_file_failure_has_a_specific_recovery_hint(tmp_path, editor_module):
+def test_unsupported_tag_failure_has_a_specific_recovery_hint(tmp_path, editor_module):
     app = build_fake_app([], editor_module)
-    missing_path = tmp_path / "does-not-exist.xmp"
+    sample = tmp_path / "unsupported-tag.xmp"
+    sample.write_text(XMP_SAMPLE, encoding="utf-8")
     with pytest.raises(RuntimeError) as error:
-        app._write_one_file(str(missing_path), {"XMP-dc:Title": "Sample title"})
+        app._write_one_file(str(sample), {"XMP-dc:NotARealTag": "Sample value"})
 
     hint = app._solution_for_error(str(error.value))
-    assert "add it again" in hint.lower()
+    assert "may not support" in hint.lower()
