@@ -27,9 +27,9 @@ jobs:
       - name: Download ExifTool
         shell: pwsh
         run: |
-          $archive = Join-Path $env:RUNNER_TEMP "exiftool-13.59_64.zip"
+          $archive = Join-Path $env:RUNNER_TEMP "exiftool-13.64_64.zip"
           $extract = Join-Path $env:RUNNER_TEMP "exiftool-extracted"
-          Invoke-WebRequest -Uri "https://exiftool.org/exiftool-13.59_64.zip" -OutFile $archive
+          Invoke-WebRequest -Uri "https://sourceforge.net/projects/exiftool/files/exiftool-13.64_64.zip/download" -OutFile $archive
           Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
           $exe = Get-ChildItem -LiteralPath $extract -Filter "exiftool(-k).exe" -Recurse | Select-Object -First 1
           if (-not $exe) { throw "ExifTool executable was not found in the downloaded archive." }
