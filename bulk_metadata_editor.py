@@ -201,7 +201,7 @@ class App:
             return "Close the file in other programs, then try again."
         if "unsupported" in message or "not saved" in message or "not writable" in message:
             return "This file type may not support the requested XMP field. Try a supported format or remove that field for this file."
-        if "no such file" in message or "cannot open" in message or "could not be found" in message:
+        if "no such file" in message or "cannot open" in message or "could not be found" in message or "error opening file" in message or "file not found" in message:
             return "Check that the file still exists at the listed location, then remove it and add it again."
         return "Check that the file is accessible and supported, close it in other programs, then retry. Keep the original backup until you confirm the result."
 
