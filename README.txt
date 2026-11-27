@@ -25,9 +25,10 @@ The workflow downloads ExifTool from its official website, bundles the applicati
 ## Included functionality
 - Select files or recursively add a folder.
 - Read metadata and export the read data to CSV.
-- Bulk-write selected XMP fields to selected files.
+- Bulk-write filled XMP fields to one or more selected files. Blank fields are left unchanged.
+- Show per-file write results, failure reasons, and suggested fixes; verify written values by reading them back.
 - Rename selected files.
 - Back up originals by default using ExifTool's `_original` files.
 
 ## Important limitations
-Metadata tags differ by format. This app writes the configured XMP tags where the file format supports them; unsupported tags may be ignored or reported by ExifTool. A field appearing in the editor does not guarantee every file type supports it. The initial build intentionally ignores blank fields rather than clearing metadata. Test on copies of important files first.
+Metadata tags differ by format. This app writes the configured XMP tags where the file format supports them; unsupported tags are reported for the affected file. A field appearing in the editor does not guarantee every file type supports it. Only files selected in the file list are changed; Ctrl/Shift-click selects multiple files. Blank fields are not sent to ExifTool and leave existing metadata unchanged. Backups are enabled by default. The Windows account running the app must have write access to each file.
