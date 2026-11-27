@@ -29,7 +29,9 @@ jobs:
         run: |
           $archive = Join-Path $env:RUNNER_TEMP "exiftool-13.64_64.zip"
           $extract = Join-Path $env:RUNNER_TEMP "exiftool-extracted"
-          Invoke-WebRequest -Uri "https://sourceforge.net/projects/exiftool/files/exiftool-13.64_64.zip/download" -OutFile $archive
+          curl.exe --fail --location --retry 3 --retry-delay 2 --output $archive "https://downloads.sourceforge.net/project/exiftool/exiftool-13.64_64.zip"
+          if ($LASTEXITCODE -ne 0) { throw "ExifTool download failed with exit code $LASTEXITCODE." }
+          if ((Get-Item -LiteralPath $archive).Length -lt 1000000) { throw "ExifTool download was smaller than expected." }
           Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
           $exe = Get-ChildItem -LiteralPath $extract -Filter "exiftool(-k).exe" -Recurse | Select-Object -First 1
           if (-not $exe) { throw "ExifTool executable was not found in the downloaded archive." }
