@@ -160,6 +160,9 @@ class App:
         lowered={str(k).lower():v for k,v in record.items()}
         for tag,expected in updates.items():
             actual=record.get(tag,lowered.get(tag.lower()))
+            if actual is None:
+                short=tag.split(":")[-1].lower()
+                actual=next((v for k,v in record.items() if str(k).split(":")[-1].lower() == short),None)
             if isinstance(actual,list): actual=", ".join(str(x) for x in actual)
             if actual is None or self._normalise_value(tag,str(actual)) != self._normalise_value(tag,expected):
                 mismatches.append(f"{tag} was not saved as entered")
@@ -181,6 +184,13 @@ class App:
                 time=match.group(4)
                 return date+("T"+time if time and time != "00:00:00" else "")
         return value
+
+    @staticmethod
+    def _tag_for_field(name,path):
+        # ID3v2 has a standard Mood frame; XMP does not define an equivalent.
+        if name == "Mood" and pathlib.Path(path).suffix.lower() == ".mp3":
+            return "ID3:TMOO"
+        return FIELDS[name]
 
     @staticmethod
     def _solution_for_error(error):
@@ -229,9 +239,14 @@ class App:
                 self.list.item(str(i),values=vals)
             if records:
                 first=records[0]
+                first_path=first.get("SourceFile",self.files[0])
                 for name,tag in FIELDS.items():
-                    short=tag.split(":")[-1]
-                    value=first.get(tag,first.get("XMP:"+short,first.get(short,"")))
+                    selected_tag=self._tag_for_field(name,first_path)
+                    short=selected_tag.split(":")[-1]
+                    value=first.get(selected_tag)
+                    if value is None:
+                        value=next((v for k,v in first.items() if str(k).split(":")[-1].lower() == short.lower()),None)
+                    if value is None: value=first.get("XMP:"+short,first.get(short,""))
                     if isinstance(value,list): value=", ".join(map(str,value))
                     self.vars[name].set(str(value) if value is not None else "")
             self.status.set(f"Metadata read for {len(records)} file(s). Fields shown are from the first file.")
@@ -243,20 +258,22 @@ class App:
             messagebox.showerror("ExifTool missing","ExifTool was not found. Place exiftool.exe and its exiftool_files folder in the application's exiftool folder.")
             return
         filled={n:v.get().strip() for n,v in self.vars.items() if v.get().strip()}
-        by_tag={}
-        for name,value in filled.items():
-            tag=FIELDS[name]
-            if tag in by_tag and by_tag[tag][1] != value:
-                messagebox.showerror("Conflicting fields",f"{by_tag[tag][0]} and {name} refer to the same metadata tag but have different values. Use the same value in both fields or leave one blank.")
-                return
-            by_tag[tag]=(name,value)
-        updates={tag:value for tag,(name,value) in by_tag.items()}
-        if not updates: messagebox.showinfo("No changes","Enter at least one metadata value."); return
+        if not filled: messagebox.showinfo("No changes","Enter at least one metadata value."); return
+        updates_by_path={}
+        for path in chosen:
+            by_tag={}
+            for name,value in filled.items():
+                tag=self._tag_for_field(name,path)
+                if tag in by_tag and by_tag[tag][1] != value:
+                    messagebox.showerror("Conflicting fields",f"{by_tag[tag][0]} and {name} refer to the same metadata tag but have different values. Use the same value in both fields or leave one blank.")
+                    return
+                by_tag[tag]=(name,value)
+            updates_by_path[path]={tag:value for tag,(name,value) in by_tag.items()}
         if not messagebox.askyesno("Confirm changes",f"Apply {len(filled)} filled metadata field(s) to {len(chosen)} selected file(s)? Blank fields will be left unchanged."): return
         successes=[]; failures=[]
         for path in chosen:
             try:
-                note=self._write_one_file(path,updates)
+                note=self._write_one_file(path,updates_by_path[path])
                 successes.append((path,note))
                 i=self.files.index(path); vals=list(self.list.item(str(i),"values")); vals[1]="Updated"; self.list.item(str(i),values=vals)
             except Exception as e:
