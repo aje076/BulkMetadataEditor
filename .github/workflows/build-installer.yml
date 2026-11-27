@@ -1,0 +1,80 @@
+name: Sample test and Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/per-file-metadata-write-report
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python build tools
+        run: python -m pip install pytest pyinstaller
+
+      - name: Download ExifTool
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "exiftool-13.64_64.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "exiftool-extracted"
+          curl.exe --fail --location --retry 3 --retry-delay 2 --output $archive "https://downloads.sourceforge.net/project/exiftool/exiftool-13.64_64.zip"
+          if ($LASTEXITCODE -ne 0) { throw "ExifTool download failed with exit code $LASTEXITCODE." }
+          if ((Get-Item -LiteralPath $archive).Length -lt 1000000) { throw "ExifTool download was smaller than expected." }
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $exe = Get-ChildItem -LiteralPath $extract -Filter "exiftool(-k).exe" -Recurse | Select-Object -First 1
+          if (-not $exe) { throw "ExifTool executable was not found in the downloaded archive." }
+          New-Item -ItemType Directory -Path "exiftool" -Force | Out-Null
+          Copy-Item -LiteralPath $exe.FullName -Destination "exiftool\exiftool.exe"
+          $support = Join-Path $exe.Directory.FullName "exiftool_files"
+          if (-not (Test-Path -LiteralPath $support)) { throw "ExifTool support folder was not found." }
+          Copy-Item -LiteralPath $support -Destination "exiftool\exiftool_files" -Recurse -Force
+          "EXIFTOOL_PATH=$((Resolve-Path 'exiftool\exiftool.exe').Path)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Test metadata updates on disposable files
+        run: python -m pytest -q tests/test_metadata_write.py
+
+      - name: Build application
+        run: python -m PyInstaller --noconfirm --clean --windowed --name BulkMetadataEditor --onedir --add-data "exiftool;exiftool" bulk_metadata_editor.py
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $compiler)) {
+            choco install innosetup --yes --no-progress
+          }
+          if (-not (Test-Path -LiteralPath $compiler)) { throw "Inno Setup compiler was not found." }
+
+      - name: Create installer
+        shell: pwsh
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $compiler "installer\BulkMetadataEditor.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE." }
+          if (-not (Test-Path -LiteralPath "release\BulkMetadataEditor-Setup.exe")) { throw "Installer output was not created." }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: BulkMetadataEditor-Setup
+          path: release/BulkMetadataEditor-Setup.exe
+          if-no-files-found: error
+
+      - name: Upload portable build for interactive verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: BulkMetadataEditor-Portable
+          path: dist/BulkMetadataEditor
+          if-no-files-found: error
