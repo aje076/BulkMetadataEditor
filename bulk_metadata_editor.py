@@ -4,31 +4,32 @@ import subprocess, json, os, sys, shutil, pathlib, re
 
 APP_NAME = "Bulk Metadata Editor"
 FIELDS = {
-    "Type": "XMP.dc.Type",
-    "Comments": "XMP.photoshop.Instructions",
-    "Composers": "XMP.audio.Composer",
-    "Contributors": "XMP.dc.Contributor",
-    "Copyright": "XMP.dc.Rights",
-    "Creators": "XMP.dc.Creator",
-    "Directors": "XMP.video.Director",
-    "Title": "XMP.dc.Title",
-    "Genre": "XMP.video.Genre",
-    "Kind": "XMP.dc.Type",
-    "Label": "XMP.xmp.Label",
-    "Mood": "XMP.audio.Mood",
-    "Owner": "XMP.xmpRights.Owner",
-    "Parental Rating": "XMP.xmp.Rating",
-    "Producers": "XMP.video.Producer",
-    "Protected": "XMP.xmpRights.Marked",
-    "Publisher": "XMP.dc.Publisher",
-    "Rating": "XMP.xmp.Rating",
-    "Tags": "XMP.dc.Subject",
-    "Writers": "XMP.video.Writer",
-    "Author": "XMP.dc.Creator",
-    "Subject": "XMP.dc.Subject",
-    "Keywords": "XMP.dc.Subject",
-    "Created Date": "XMP.xmp.CreateDate",
-    "Modified Date": "XMP.xmp.ModifyDate",
+    # ExifTool's write syntax uses group:tag names (for example XMP-dc:Title).
+    "Type": "XMP-dc:Type",
+    "Comments": "XMP-photoshop:Instructions",
+    "Composers": "XMP-xmpDM:Composer",
+    "Contributors": "XMP-dc:Contributor",
+    "Copyright": "XMP-dc:Rights",
+    "Creators": "XMP-dc:Creator",
+    "Directors": "XMP-xmpDM:Director",
+    "Title": "XMP-dc:Title",
+    "Genre": "XMP-xmpDM:Genre",
+    "Kind": "XMP-dc:Type",
+    "Label": "XMP-xmp:Label",
+    "Mood": "XMP-audio:Mood",
+    "Owner": "XMP-xmpRights:Owner",
+    "Parental Rating": "XMP-xmp:Rating",
+    "Producers": "XMP-xmpDM:Producer",
+    "Protected": "XMP-xmpRights:Marked",
+    "Publisher": "XMP-dc:Publisher",
+    "Rating": "XMP-xmp:Rating",
+    "Tags": "XMP-dc:Subject",
+    "Writers": "XMP-xmpDM:Writer",
+    "Author": "XMP-dc:Creator",
+    "Subject": "XMP-dc:Subject",
+    "Keywords": "XMP-dc:Subject",
+    "Created Date": "XMP-xmp:CreateDate",
+    "Modified Date": "XMP-xmp:ModifyDate",
 }
 SUPPORTED = {".jpg",".jpeg",".png",".tif",".tiff",".webp",".heic",".mp3",".flac",".wav",".m4a",".aac",".ogg",".mp4",".m4v",".mov",".mkv",".avi",".wmv",".pdf",".docx",".xlsx",".pptx",".txt"}
 
@@ -76,6 +77,7 @@ class App:
         self.list.column("#0",width=360); self.list.column("type",width=85); self.list.column("status",width=100)
         sy=ttk.Scrollbar(left,orient="vertical",command=self.list.yview); self.list.configure(yscrollcommand=sy.set)
         self.list.pack(side="left",fill="both",expand=True); sy.pack(side="right",fill="y")
+        ttk.Label(left,text="Select one file, or Ctrl/Shift-click to select multiple files.").pack(anchor="w",pady=3)
         ttk.Label(right,text="Edit selected metadata").pack(anchor="w")
         form=ttk.Frame(right); form.pack(fill="both",expand=True,pady=5)
         self.vars={}
@@ -90,7 +92,7 @@ class App:
             self.vars[name]=v
         inner.columnconfigure(1,weight=1)
         ttk.Button(right,text="Apply fields to selected files",command=self.apply).pack(fill="x",pady=5)
-        ttk.Label(right,text="Filename is changed using the Rename box below. Blank fields are ignored; use Clear Field to remove a tag.").pack(anchor="w",pady=3)
+        ttk.Label(right,text="Only filled fields are written. Blank fields leave existing metadata unchanged.").pack(anchor="w",pady=3)
         rename=ttk.Frame(right); rename.pack(fill="x",pady=4)
         ttk.Label(rename,text="Rename selected files to:").pack(side="left")
         self.rename_var=tk.StringVar(); ttk.Entry(rename,textvariable=self.rename_var).pack(side="left",fill="x",expand=True,padx=5)
@@ -132,6 +134,88 @@ class App:
         cp=subprocess.run([self.tool]+args,capture_output=True,text=True,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
         if cp.returncode not in (0,1): raise RuntimeError(cp.stderr.strip() or cp.stdout.strip() or "ExifTool failed")
         return cp.stdout
+
+    def _write_one_file(self,path,updates):
+        args=[]
+        if not self.backup.get(): args.append("-overwrite_original")
+        for tag,value in updates.items(): args.append("-"+tag+"="+value)
+        args.append(path)
+        cp=subprocess.run([self.tool]+args,capture_output=True,text=True,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+        output="\n".join(x.strip() for x in (cp.stdout,cp.stderr) if x and x.strip())
+
+        # Read the requested tags back so a no-op or unsupported tag is not
+        # reported as a successful write just because ExifTool started.
+        check_args=["-json","-G1","-s"]+["-"+tag for tag in updates]+[path]
+        verify=subprocess.run([self.tool]+check_args,capture_output=True,text=True,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+        if verify.returncode != 0:
+            reason=verify.stderr.strip() or verify.stdout.strip() or "Could not verify the written metadata."
+            if cp.returncode != 0: reason=f"ExifTool exited with code {cp.returncode}: {output or 'write error'}; verification also failed: {reason}"
+            raise RuntimeError(reason)
+        try:
+            records=json.loads(verify.stdout)
+            record=records[0]
+        except (ValueError,IndexError,TypeError):
+            raise RuntimeError("ExifTool could not read the file back to verify the changes. Check that the file is supported and readable.")
+        mismatches=[]
+        lowered={str(k).lower():v for k,v in record.items()}
+        for tag,expected in updates.items():
+            actual=record.get(tag,lowered.get(tag.lower()))
+            if isinstance(actual,list): actual=", ".join(str(x) for x in actual)
+            if actual is None or self._normalise_value(tag,str(actual)) != self._normalise_value(tag,expected):
+                mismatches.append(f"{tag} was not saved as entered")
+        if mismatches:
+            reason="; ".join(mismatches)+". The file format may not support this XMP field."
+            if cp.returncode != 0: reason+=f" ExifTool also reported: {output or 'write error'}. Some other fields may have been applied."
+            raise RuntimeError(reason)
+        return (f"ExifTool returned code {cp.returncode}: {output}" if cp.returncode != 0 else "")
+
+    @staticmethod
+    def _normalise_value(tag,value):
+        value=str(value).strip()
+        if tag in {"XMP-xmp:CreateDate","XMP-xmp:ModifyDate"}:
+            # ExifTool commonly renders XMP dates as YYYY:MM:DD HH:MM:SSZ,
+            # while users usually enter ISO dates or timestamps.
+            match=re.match(r"^(\d{4})[:-](\d{2})[:-](\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?",value)
+            if match:
+                date="-".join(match.group(i) for i in (1,2,3))
+                return date+("T"+match.group(4) if match.group(4) else "")
+        return value
+
+    @staticmethod
+    def _solution_for_error(error):
+        message=error.lower()
+        if "permission" in message or "access is denied" in message or "read-only" in message:
+            return "Check that the file is not read-only and that your Windows account can edit its folder. If it is on a removable or shared drive, check that drive's write access."
+        if "being used" in message or "in use" in message or "locked" in message:
+            return "Close the file in other programs, then try again."
+        if "unsupported" in message or "not saved" in message or "not writable" in message:
+            return "This file type may not support the requested XMP field. Try a supported format or remove that field for this file."
+        if "no such file" in message or "cannot open" in message or "could not be found" in message:
+            return "Check that the file still exists at the listed location, then remove it and add it again."
+        return "Check that the file is accessible and supported, close it in other programs, then retry. Keep the original backup until you confirm the result."
+
+    def _show_write_results(self,successes,failures):
+        summary=f"Processed {len(successes)+len(failures)} file(s): {len(successes)} successful, {len(failures)} failed."
+        lines=[summary,"", "SUCCESSFUL FILES"]
+        lines.extend("  "+path+("\n    Note: "+note if note else "") for path,note in successes) if successes else lines.append("  None")
+        lines.extend(["", "FILES THAT FAILED"])
+        if failures:
+            for path,error in failures:
+                lines.extend(["  "+path,"    Reason: "+error,"    Try: "+self._solution_for_error(error)])
+        else:
+            lines.append("  None")
+        report="\n".join(lines)
+        win=tk.Toplevel(self.root); win.title("Metadata update results"); win.geometry("760x480"); win.transient(self.root)
+        ttk.Label(win,text=summary,padding=10).pack(anchor="w")
+        body=ttk.Frame(win,padding=(10,0,10,10)); body.pack(fill="both",expand=True)
+        text=tk.Text(body,wrap="word",height=20); scroll=ttk.Scrollbar(body,orient="vertical",command=text.yview)
+        text.configure(yscrollcommand=scroll.set); text.pack(side="left",fill="both",expand=True); scroll.pack(side="right",fill="y")
+        text.insert("1.0",report); text.configure(state="disabled")
+        buttons=ttk.Frame(win,padding=10); buttons.pack(fill="x")
+        def copy_report():
+            win.clipboard_clear(); win.clipboard_append(report); self.status.set("Processing report copied to clipboard.")
+        ttk.Button(buttons,text="Copy report",command=copy_report).pack(side="left")
+        ttk.Button(buttons,text="Close",command=win.destroy).pack(side="right")
     def read_metadata(self):
         if not self.files: return
         self.status.set("Reading metadata..."); self.root.update_idletasks()
@@ -145,7 +229,7 @@ class App:
             if records:
                 first=records[0]
                 for name,tag in FIELDS.items():
-                    short=tag.split(".")[-1]
+                    short=tag.split(":")[-1]
                     value=first.get(tag,first.get("XMP:"+short,first.get(short,"")))
                     if isinstance(value,list): value=", ".join(map(str,value))
                     self.vars[name].set(str(value) if value is not None else "")
@@ -154,18 +238,33 @@ class App:
     def apply(self):
         chosen=[self.files[int(x)] for x in self.list.selection()]
         if not chosen: messagebox.showinfo("Select files","Select one or more files first."); return
-        updates={n:v.get().strip() for n,v in self.vars.items() if v.get().strip()}
+        if not self.tool:
+            messagebox.showerror("ExifTool missing","ExifTool was not found. Place exiftool.exe and its exiftool_files folder in the application's exiftool folder.")
+            return
+        filled={n:v.get().strip() for n,v in self.vars.items() if v.get().strip()}
+        by_tag={}
+        for name,value in filled.items():
+            tag=FIELDS[name]
+            if tag in by_tag and by_tag[tag][1] != value:
+                messagebox.showerror("Conflicting fields",f"{by_tag[tag][0]} and {name} refer to the same metadata tag but have different values. Use the same value in both fields or leave one blank.")
+                return
+            by_tag[tag]=(name,value)
+        updates={tag:value for tag,(name,value) in by_tag.items()}
         if not updates: messagebox.showinfo("No changes","Enter at least one metadata value."); return
-        if not messagebox.askyesno("Confirm changes",f"Apply {len(updates)} metadata field(s) to {len(chosen)} file(s)?"): return
-        args=[]
-        if not self.backup.get(): args.append("-overwrite_original")
-        for n,value in updates.items(): args.append("-"+FIELDS[n]+"="+value)
-        args.extend(chosen)
-        try:
-            self.run_tool(args)
-            self.status.set(f"Updated {len(chosen)} file(s).")
-            messagebox.showinfo("Complete",f"Metadata updated for {len(chosen)} file(s).")
-        except Exception as e: messagebox.showerror("Write error",str(e))
+        if not messagebox.askyesno("Confirm changes",f"Apply {len(filled)} filled metadata field(s) to {len(chosen)} selected file(s)? Blank fields will be left unchanged."): return
+        successes=[]; failures=[]
+        for path in chosen:
+            try:
+                note=self._write_one_file(path,updates)
+                successes.append((path,note))
+                i=self.files.index(path); vals=list(self.list.item(str(i),"values")); vals[1]="Updated"; self.list.item(str(i),values=vals)
+            except Exception as e:
+                failures.append((path,str(e)))
+                i=self.files.index(path); vals=list(self.list.item(str(i),"values")); vals[1]="Failed"; self.list.item(str(i),values=vals)
+            self.status.set(f"Processed {len(successes)+len(failures)} of {len(chosen)} selected file(s)...")
+            self.root.update_idletasks()
+        self.status.set(f"Finished: {len(successes)} successful, {len(failures)} failed.")
+        self._show_write_results(successes,failures)
     def rename(self):
         chosen=[self.files[int(x)] for x in self.list.selection()]
         pattern=self.rename_var.get().strip()
