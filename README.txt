@@ -6,8 +6,8 @@ This project includes a Windows desktop metadata editor and an automated workflo
 1. Create a free GitHub account if you do not already have one.
 2. Create a new repository and upload the contents of this ZIP (keep the `.github` folder).
 3. Open the repository's **Actions** tab.
-4. Select **Build Windows Setup.exe** and click **Run workflow**.
-5. Wait for the Windows build to finish successfully.
+4. Select **Sample test and Windows installer** and click **Run workflow**.
+5. The workflow tests metadata writes on disposable XMP sample files, then builds the Windows installer only if those tests pass.
 6. Open the completed workflow run. Under **Artifacts**, download `BulkMetadataEditor-Setup`.
 7. Extract the downloaded artifact ZIP. It contains `BulkMetadataEditor-Setup.exe`.
 8. Run `BulkMetadataEditor-Setup.exe` on Windows 11 and follow the installer.
