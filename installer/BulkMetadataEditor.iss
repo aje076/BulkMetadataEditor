@@ -1,4 +1,4 @@
-# Inno Setup 6 installer script
+; Inno Setup 6 installer script
 #define MyAppName "Bulk Metadata Editor"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Bulk Metadata Editor"
